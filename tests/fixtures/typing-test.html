@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Copilot Typing Test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 640px;
+        margin: 2rem auto;
+        padding: 1rem;
+      }
+      textarea,
+      [contenteditable] {
+        width: 100%;
+        min-height: 120px;
+        margin: 0.5rem 0 1.5rem;
+        padding: 0.75rem;
+        font-size: 1rem;
+        border: 1px solid #888;
+        border-radius: 6px;
+      }
+      label {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Remote AI Browser Copilot — Typing Fixture</h1>
+    <p id="instructions">
+      Focus a field below, then use PREPARE / GO / HALT or the CLI type command.
+    </p>
+    <p>Sample context: Meeting notes for Project Orion — follow up with the professor about the draft syllabus.</p>
+
+    <label for="reply">Reply textarea</label>
+    <textarea id="reply" placeholder="Type your reply here…"></textarea>
+
+    <label for="editor">Contenteditable editor</label>
+    <div id="editor" contenteditable="true" role="textbox" aria-label="Compose editor"></div>
+
+    <label for="search">Search</label>
+    <input id="search" type="search" placeholder="Search…" />
+  </body>
+</html>

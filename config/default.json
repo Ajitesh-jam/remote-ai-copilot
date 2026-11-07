@@ -1,0 +1,39 @@
+{
+  "browser": {
+    "mode": "playwright",
+    "headless": false,
+    "cdpEndpoint": "http://127.0.0.1:9222",
+    "extensionEnabled": false,
+    "selectedTabOnly": true,
+    "maxVisibleTextChars": 12000
+  },
+  "agent": {
+    "defaultMode": "observe",
+    "requireGo": true,
+    "allowAutomaticSubmission": false,
+    "typingMode": "chunked",
+    "draftProvider": "stub",
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "typing": {
+    "mode": "chunked",
+    "charactersPerSecond": 60,
+    "chunkSize": 20,
+    "delayBetweenChunksMs": 100
+  },
+  "shortcuts": {
+    "prepare": "Command+Option+P",
+    "go": "Command+Option+G",
+    "halt": "Command+Option+H"
+  },
+  "server": {
+    "mode": "local",
+    "url": "ws://127.0.0.1:4000/ws/agent"
+  },
+  "logging": {
+    "level": "debug",
+    "redactContent": true,
+    "logDirectory": "./logs"
+  }
+}

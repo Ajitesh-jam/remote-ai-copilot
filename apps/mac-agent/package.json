@@ -1,0 +1,29 @@
+{
+  "name": "@remote-ai-copilot/mac-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "copilot": "./dist/cli/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "cli": "tsx src/cli/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@remote-ai-copilot/logger": "0.1.0",
+    "@remote-ai-copilot/shared-types": "0.1.0",
+    "commander": "^13.1.0",
+    "fastify": "^5.2.1",
+    "node-global-key-listener": "^0.3.0",
+    "node-notifier": "^10.0.1",
+    "playwright": "^1.51.0"
+  },
+  "devDependencies": {
+    "@types/node-notifier": "^8.0.5",
+    "tsx": "^4.19.3"
+  }
+}

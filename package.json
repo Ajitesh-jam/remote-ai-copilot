@@ -1,0 +1,26 @@
+{
+  "name": "remote-ai-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote AI Browser Copilot — Mac-local agent with PREPARE / GO / HALT control plane",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @remote-ai-copilot/shared-types && npm run build -w @remote-ai-copilot/logger && npm run build -w @remote-ai-copilot/mac-agent",
+    "dev:agent": "npm run dev -w @remote-ai-copilot/mac-agent",
+    "copilot": "node apps/mac-agent/dist/cli/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}
