@@ -106,9 +106,17 @@ export interface AgentStatus {
   activeTab: TabInfo | null;
   draftPreview: string | null;
   draftExplanation: string | null;
+  remainingPreview: string | null;
+  canResume: boolean;
   lastError: string | null;
   lastSuccessfulAction: string | null;
   taskId: string | null;
+  shortcuts: {
+    prepare: string;
+    go: string;
+    halt: string;
+    resume: string;
+  };
 }
 
 export interface CopilotConfig {
@@ -128,12 +136,14 @@ export interface CopilotConfig {
     draftProvider: "stub" | "http";
     host: string;
     port: number;
+    replaceFocusedOnGo: boolean;
   };
   typing: TypingConfig;
   shortcuts: {
     prepare: string;
     go: string;
     halt: string;
+    resume: string;
   };
   server: {
     mode: "local" | "remote";

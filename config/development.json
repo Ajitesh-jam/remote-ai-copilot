@@ -1,7 +1,4 @@
 {
-  "browser": {
-    "headless": true
-  },
   "logging": {
     "level": "debug"
   }

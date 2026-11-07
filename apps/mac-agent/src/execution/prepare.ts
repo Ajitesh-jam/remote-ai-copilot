@@ -16,6 +16,19 @@ export interface PrepareResult {
   context: PageContext;
   draft: DraftResult;
   snapshot: PrepareSnapshot;
+  resolvedInstruction: string;
+}
+
+/** Prefer explicit instruction, then selection, then focused field value. */
+export function resolveInstruction(
+  explicit: string | undefined,
+  context: PageContext
+): string {
+  if (explicit?.trim()) return explicit.trim();
+  if (context.selection.trim()) return context.selection.trim();
+  const focusedValue = context.focusedElement?.value?.trim();
+  if (focusedValue) return focusedValue;
+  return "Generate an appropriate response for the focused input based on the page context.";
 }
 
 export async function runPrepare(opts: {
@@ -48,6 +61,8 @@ export async function runPrepare(opts: {
       throw new DOMException("Aborted", "AbortError");
     }
 
+    const resolvedInstruction = resolveInstruction(opts.instruction, context);
+
     const snapshot: PrepareSnapshot = {
       tabId: context.tab.id,
       url: context.tab.url,
@@ -64,20 +79,18 @@ export async function runPrepare(opts: {
         tabId: context.tab.id,
         url: context.tab.url,
         textLength: context.visibleText.length,
+        instructionLength: resolvedInstruction.length,
       },
     });
 
     state.transition("GENERATING_DRAFT", "llm request");
-    logger.event("LLM_REQUEST_STARTED", "STARTED", { taskId });
+    logger.event("LLM_REQUEST_STARTED", "STARTED", {
+      taskId,
+      details: { instructionPreview: resolvedInstruction.slice(0, 120) },
+    });
 
-    const instruction =
-      opts.instruction?.trim() ||
-      "Generate an appropriate response for the focused input based on the page context.";
-
-    // Providers apply DEFAULT_SYSTEM_PROMPT themselves (Phase 3+ LLM).
-    // Pass only the user-facing instruction here.
     const draft = await draftProvider.generateDraft({
-      instruction,
+      instruction: resolvedInstruction,
       context,
       signal,
     });
@@ -107,7 +120,7 @@ export async function runPrepare(opts: {
 
     state.transition("DRAFT_READY", "draft stored");
 
-    return { taskId, context, draft, snapshot };
+    return { taskId, context, draft, snapshot, resolvedInstruction };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error;

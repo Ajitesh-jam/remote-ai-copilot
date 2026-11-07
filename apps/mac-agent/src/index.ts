@@ -35,6 +35,15 @@ async function main(): Promise<void> {
       onHalt: () => {
         session.halt();
       },
+      onResume: async () => {
+        try {
+          await session.resume();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          session.setLastError(message);
+          session.notify("RESUME failed", message);
+        }
+      },
     },
     session.logger.child("keyboard")
   );
@@ -42,7 +51,19 @@ async function main(): Promise<void> {
   session.logger.child("agent").info("Agent ready", {
     address: api.address,
     shortcuts: shortcuts.backend,
+    keys: config.shortcuts,
   });
+
+  console.log("");
+  console.log("=== Remote AI Browser Copilot ===");
+  console.log(`API:       ${api.address}`);
+  console.log(`Hotkeys:   ${shortcuts.backend}`);
+  console.log(`  PREPARE  ${config.shortcuts.prepare}`);
+  console.log(`  GO       ${config.shortcuts.go}`);
+  console.log(`  HALT     ${config.shortcuts.halt}`);
+  console.log(`  RESUME   ${config.shortcuts.resume}`);
+  console.log("CLI fallback: npm run copilot -- prepare|go|halt|resume");
+  console.log("");
 
   const shutdown = async (signal: string) => {
     session.logger.child("agent").event("AGENT_STOPPED", "STARTED", {

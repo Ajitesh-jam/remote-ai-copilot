@@ -14,18 +14,20 @@
     "typingMode": "chunked",
     "draftProvider": "stub",
     "host": "127.0.0.1",
-    "port": 8787
+    "port": 8787,
+    "replaceFocusedOnGo": true
   },
   "typing": {
     "mode": "chunked",
     "charactersPerSecond": 60,
-    "chunkSize": 20,
-    "delayBetweenChunksMs": 100
+    "chunkSize": 12,
+    "delayBetweenChunksMs": 80
   },
   "shortcuts": {
-    "prepare": "Command+Option+P",
-    "go": "Command+Option+G",
-    "halt": "Command+Option+H"
+    "prepare": "Control+Option+P",
+    "go": "Control+Option+G",
+    "halt": "Control+Option+H",
+    "resume": "Control+Option+R"
   },
   "server": {
     "mode": "local",

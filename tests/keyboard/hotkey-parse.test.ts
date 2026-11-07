@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { toHotkeyString } from "../../apps/mac-agent/src/keyboard/shortcuts.js";
+import {
+  parseCombo,
+  toHotkeyString,
+} from "../../apps/mac-agent/src/keyboard/shortcuts.js";
 
 describe("toHotkeyString", () => {
   it("maps Command+Option+P", () => {
@@ -8,5 +11,17 @@ describe("toHotkeyString", () => {
 
   it("maps Control+Shift+H", () => {
     expect(toHotkeyString("Control+Shift+H")).toBe("ctrl+shift+h");
+  });
+});
+
+describe("parseCombo", () => {
+  it("parses Command+Option+P", () => {
+    expect(parseCombo("Command+Option+P")).toEqual({
+      key: "p",
+      meta: true,
+      alt: true,
+      ctrl: false,
+      shift: false,
+    });
   });
 });

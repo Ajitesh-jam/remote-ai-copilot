@@ -17,7 +17,7 @@ const ALLOWED: Record<AgentState, AgentState[]> = {
   VALIDATING: ["TYPING", "DRAFT_READY", "HALTED", "ERROR", "IDLE"],
   TYPING: ["COMPLETED", "HALTED", "ERROR"],
   COMPLETED: ["IDLE", "CAPTURING_CONTEXT", "HALTED", "DISCONNECTED"],
-  HALTED: ["IDLE", "CAPTURING_CONTEXT", "DISCONNECTED"],
+  HALTED: ["IDLE", "CAPTURING_CONTEXT", "VALIDATING", "TYPING", "DISCONNECTED"],
   ERROR: ["IDLE", "CAPTURING_CONTEXT", "HALTED", "DISCONNECTED"],
 };
 
@@ -70,6 +70,10 @@ export class AgentStateMachine {
 
   canGo(): boolean {
     return this.state === "DRAFT_READY";
+  }
+
+  canResume(): boolean {
+    return this.state === "HALTED";
   }
 }
 

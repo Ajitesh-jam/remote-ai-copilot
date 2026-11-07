@@ -49,7 +49,9 @@ describe("PlaywrightAdapter", () => {
     expect(focused?.tagName ?? focused?.tag).toBe("textarea");
 
     const controller = new AbortController();
-    await adapter.insertText("Hello from PlaywrightAdapter test", controller.signal);
+    await adapter.insertText("Hello from PlaywrightAdapter test", controller.signal, {
+      replace: true,
+    });
 
     const value = await adapter.inputValue("#reply");
     expect(value).toBe("Hello from PlaywrightAdapter test");
@@ -66,10 +68,11 @@ describe("PlaywrightAdapter", () => {
     await adapter.clearSelector("#reply");
     await adapter.focusSelector("#reply");
 
-    config.typing.mode = "chunked";
     const controller = new AbortController();
     const longText = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    const typingPromise = adapter.insertText(longText, controller.signal);
+    const typingPromise = adapter.insertText(longText, controller.signal, {
+      replace: true,
+    });
     await new Promise((r) => setTimeout(r, 150));
     controller.abort();
 

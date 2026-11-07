@@ -42,24 +42,28 @@ export class PlaywrightAdapter implements BrowserAdapter {
     return this.connected && this.browser !== null;
   }
 
+  private connectionMode: "playwright" | "cdp" = "playwright";
+
   async connect(): Promise<void> {
     if (this.connected) return;
-    this.logger.event("BROWSER_CONNECTION_STARTED", "STARTED");
+    this.logger.event("BROWSER_CONNECTION_STARTED", "STARTED", {
+      details: { mode: this.config.browser.mode },
+    });
     const started = Date.now();
     try {
-      this.browser = await chromium.launch({
-        headless: this.config.browser.headless,
-      });
-      this.context = await this.browser.newContext();
-      this.context.on("page", (page) => {
-        this.trackPage(page);
-      });
-      const page = await this.context.newPage();
-      this.trackPage(page);
+      if (this.config.browser.mode === "cdp") {
+        await this.connectOverCdp();
+      } else {
+        await this.connectLaunch();
+      }
       this.connected = true;
       this.logger.event("BROWSER_CONNECTED", "SUCCESS", {
         durationMs: Date.now() - started,
-        details: { mode: "playwright", headless: this.config.browser.headless },
+        details: {
+          mode: this.connectionMode,
+          headless: this.config.browser.headless,
+          tabs: this.pages.size,
+        },
       });
     } catch (error) {
       this.logger.event("BROWSER_CONNECTED", "FAILED", {
@@ -70,18 +74,62 @@ export class PlaywrightAdapter implements BrowserAdapter {
     }
   }
 
+  private async connectLaunch(): Promise<void> {
+    this.connectionMode = "playwright";
+    this.browser = await chromium.launch({
+      headless: this.config.browser.headless,
+    });
+    this.context = await this.browser.newContext();
+    this.context.on("page", (page) => {
+      this.trackPage(page);
+    });
+    const page = await this.context.newPage();
+    this.trackPage(page);
+  }
+
+  /**
+   * Attach to an already-running Chromium/Chrome with remote debugging.
+   * Use a dedicated --user-data-dir profile (Chrome 136+ blocks default profile).
+   */
+  private async connectOverCdp(): Promise<void> {
+    this.connectionMode = "cdp";
+    const endpoint = this.config.browser.cdpEndpoint;
+    this.browser = await chromium.connectOverCDP(endpoint);
+    const contexts = this.browser.contexts();
+    this.context = contexts[0] ?? (await this.browser.newContext());
+    this.context.on("page", (page) => {
+      this.trackPage(page);
+    });
+    const existing = this.context.pages();
+    if (existing.length === 0) {
+      const page = await this.context.newPage();
+      this.trackPage(page);
+    } else {
+      for (const page of existing) {
+        this.trackPage(page);
+      }
+    }
+  }
+
   async disconnect(): Promise<void> {
     this.stopRequested = true;
     try {
-      await this.context?.close();
-      await this.browser?.close();
+      if (this.connectionMode === "cdp") {
+        // Do not close the user's Chrome — only detach Playwright
+        await this.browser?.close();
+      } else {
+        await this.context?.close();
+        await this.browser?.close();
+      }
     } finally {
       this.browser = null;
       this.context = null;
       this.pages.clear();
       this.selectedTabId = null;
       this.connected = false;
-      this.logger.event("BROWSER_DISCONNECTED", "SUCCESS");
+      this.logger.event("BROWSER_DISCONNECTED", "SUCCESS", {
+        details: { mode: this.connectionMode },
+      });
     }
   }
 
@@ -261,11 +309,19 @@ export class PlaywrightAdapter implements BrowserAdapter {
     return extractFocusedElement(entry.page);
   }
 
-  async insertText(text: string, signal: AbortSignal): Promise<void> {
+  async insertText(
+    text: string,
+    signal: AbortSignal,
+    opts?: {
+      replace?: boolean;
+      onProgress?: (typedChars: number) => void;
+    }
+  ): Promise<{ typedChars: number }> {
     this.stopRequested = false;
     const entry = this.requirePage();
     const typing = this.config.typing;
     const focused = await extractFocusedElement(entry.page);
+    const replace = opts?.replace ?? false;
 
     if (!focused) {
       throw new Error("No focused editable element");
@@ -287,7 +343,7 @@ export class PlaywrightAdapter implements BrowserAdapter {
     }
 
     this.logger.event("TYPING_STARTED", "STARTED", {
-      details: { length: text.length, mode: typing.mode },
+      details: { length: text.length, mode: typing.mode, replace },
     });
 
     await entry.page.evaluate(() => {
@@ -296,47 +352,77 @@ export class PlaywrightAdapter implements BrowserAdapter {
       el.focus();
     });
 
+    if (replace) {
+      await this.clearFocused(entry.page);
+    }
+
     if (typing.mode === "instant") {
       if (signal.aborted || this.stopRequested) {
-        this.logger.event("TYPING_CANCELLED", "CANCELLED");
+        this.logger.event("TYPING_CANCELLED", "CANCELLED", {
+          details: { typedChars: 0 },
+        });
         throw new DOMException("Aborted", "AbortError");
       }
-      await this.insertInstant(entry.page, text);
+      await this.insertInstant(entry.page, text, replace);
+      opts?.onProgress?.(text.length);
       this.logger.event("TYPING_COMPLETED", "SUCCESS", {
         details: { length: text.length },
       });
-      return;
+      return { typedChars: text.length };
     }
 
-    await this.insertChunked(entry.page, text, typing, signal);
+    return this.insertChunked(entry.page, text, typing, signal, opts?.onProgress);
   }
 
-  private async insertInstant(page: Page, text: string): Promise<void> {
-    const handled = await page.evaluate((value) => {
+  private async clearFocused(page: Page): Promise<void> {
+    await page.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
-      if (!el) return false;
+      if (!el) return;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        const proto = el instanceof HTMLTextAreaElement
-          ? window.HTMLTextAreaElement.prototype
-          : window.HTMLInputElement.prototype;
-        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-        if (setter) {
-          setter.call(el, value);
-        } else {
-          el.value = value;
-        }
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return true;
-      }
-      if (el.isContentEditable) {
-        el.focus();
+        el.select();
+      } else if (el.isContentEditable) {
         document.execCommand("selectAll", false);
-        document.execCommand("insertText", false, value);
-        return true;
       }
-      return false;
-    }, text);
+    });
+    await page.keyboard.press("Backspace");
+  }
+
+  private async insertInstant(
+    page: Page,
+    text: string,
+    replace: boolean
+  ): Promise<void> {
+    const handled = await page.evaluate(
+      ({ value, shouldReplace }) => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el) return false;
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          const start = shouldReplace ? 0 : el.selectionStart ?? el.value.length;
+          const end = shouldReplace ? el.value.length : el.selectionEnd ?? start;
+          const next = el.value.slice(0, start) + value + el.value.slice(end);
+          const proto =
+            el instanceof HTMLTextAreaElement
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+          if (setter) setter.call(el, next);
+          else el.value = next;
+          const caret = start + value.length;
+          el.setSelectionRange(caret, caret);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+        if (el.isContentEditable) {
+          el.focus();
+          if (shouldReplace) document.execCommand("selectAll", false);
+          document.execCommand("insertText", false, value);
+          return true;
+        }
+        return false;
+      },
+      { value: text, shouldReplace: replace }
+    );
 
     if (!handled) {
       await page.keyboard.type(text, { delay: 0 });
@@ -347,37 +433,51 @@ export class PlaywrightAdapter implements BrowserAdapter {
     page: Page,
     text: string,
     typing: TypingConfig,
-    signal: AbortSignal
-  ): Promise<void> {
+    signal: AbortSignal,
+    onProgress?: (typedChars: number) => void
+  ): Promise<{ typedChars: number }> {
     const chunkSize =
-      typing.mode === "human_paced"
-        ? 1
-        : Math.max(1, typing.chunkSize);
+      typing.mode === "human_paced" ? 1 : Math.max(1, typing.chunkSize);
     const delay =
       typing.mode === "human_paced"
         ? Math.max(1, Math.round(1000 / Math.max(1, typing.charactersPerSecond)))
         : typing.delayBetweenChunksMs;
 
+    let typed = 0;
     for (let i = 0; i < text.length; i += chunkSize) {
       if (signal.aborted || this.stopRequested) {
+        onProgress?.(typed);
         this.logger.event("TYPING_CANCELLED", "CANCELLED", {
-          details: { typedChars: i },
+          details: { typedChars: typed },
         });
         throw new DOMException("Aborted", "AbortError");
       }
       const chunk = text.slice(i, i + chunkSize);
       await page.keyboard.type(chunk, { delay: 0 });
+      typed += chunk.length;
+      onProgress?.(typed);
       this.logger.event("TYPING_CHUNK_COMPLETED", "SUCCESS", {
-        details: { offset: i, chunkSize: chunk.length },
+        details: { offset: i, chunkSize: chunk.length, typedChars: typed },
       });
       if (i + chunkSize < text.length && delay > 0) {
-        await sleep(delay, signal);
+        try {
+          await sleep(delay, signal);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            onProgress?.(typed);
+            this.logger.event("TYPING_CANCELLED", "CANCELLED", {
+              details: { typedChars: typed },
+            });
+          }
+          throw error;
+        }
       }
     }
 
     this.logger.event("TYPING_COMPLETED", "SUCCESS", {
       details: { length: text.length },
     });
+    return { typedChars: typed };
   }
 
   async stop(): Promise<void> {

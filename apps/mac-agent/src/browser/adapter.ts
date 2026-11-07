@@ -18,6 +18,13 @@ export interface BrowserAdapter {
   screenshot(): Promise<Buffer>;
   getFocusedElement(): Promise<ElementInfo | null>;
 
-  insertText(text: string, signal: AbortSignal): Promise<void>;
+  insertText(
+    text: string,
+    signal: AbortSignal,
+    opts?: {
+      replace?: boolean;
+      onProgress?: (typedChars: number) => void;
+    }
+  ): Promise<{ typedChars: number }>;
   stop(): Promise<void>;
 }

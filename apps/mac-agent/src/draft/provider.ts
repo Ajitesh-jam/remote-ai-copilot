@@ -8,6 +8,62 @@ export interface DraftProvider {
   }): Promise<DraftResult>;
 }
 
+function looksLikeCodeRequest(instruction: string): boolean {
+  const t = instruction.toLowerCase();
+  return (
+    t.includes("code") ||
+    t.includes("python") ||
+    t.includes("javascript") ||
+    t.includes("script") ||
+    t.includes("function") ||
+    t.includes("write me") ||
+    t.includes("print")
+  );
+}
+
+function stubCodeFor(instruction: string): string | null {
+  const t = instruction.toLowerCase();
+  if (t.includes("python") && (t.includes("hello") || t.includes("print"))) {
+    return [
+      '"""Simple Hello World script."""',
+      "",
+      "def main() -> None:",
+      '    message = "Hello, World!"',
+      "    print(message)",
+      "",
+      "",
+      'if __name__ == "__main__":',
+      "    main()",
+      "",
+    ].join("\n");
+  }
+  if (t.includes("javascript") && (t.includes("hello") || t.includes("print") || t.includes("console"))) {
+    return [
+      "function main() {",
+      '  const message = "Hello, World!";',
+      "  console.log(message);",
+      "}",
+      "",
+      "main();",
+      "",
+    ].join("\n");
+  }
+  if (t.includes("hello world") || (t.includes("hello") && t.includes("print"))) {
+    return [
+      '"""Simple Hello World script."""',
+      "",
+      "def main() -> None:",
+      '    print("Hello, World!")',
+      "",
+      "",
+      'if __name__ == "__main__":',
+      "    main()",
+      "",
+    ].join("\n");
+  }
+  return null;
+}
+
 export class StubDraftProvider implements DraftProvider {
   async generateDraft(input: {
     instruction: string;
@@ -19,23 +75,49 @@ export class StubDraftProvider implements DraftProvider {
     }
 
     const { context, instruction } = input;
-    const selection = context.selection.trim();
     const focus = context.focusedElement;
+
+    const code = stubCodeFor(instruction);
+    if (code) {
+      return {
+        draft: code,
+        explanation: `Stub generated code for instruction: ${instruction.slice(0, 120)}`,
+        target: {
+          type: focus?.tagName ?? "textarea",
+          purpose: "code",
+        },
+      };
+    }
+
+    if (looksLikeCodeRequest(instruction)) {
+      return {
+        draft: [
+          `# Response to: ${instruction.slice(0, 120)}`,
+          ``,
+          `def main():`,
+          `    print("Hello from stub draft")`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    main()`,
+          ``,
+        ].join("\n"),
+        explanation: "Stub generated a generic code draft from the prompt in the focused field.",
+        target: { type: focus?.tagName ?? "textarea", purpose: "code" },
+      };
+    }
+
+    const selection = context.selection.trim();
     const focusHint = focus
       ? `${focus.tagName}${focus.placeholder ? ` (${focus.placeholder})` : ""}`
       : "no focused input";
 
     const draft = [
-      `[Stub draft]`,
-      `Page: ${context.tab.title || context.tab.url}`,
-      instruction ? `Instruction: ${instruction}` : null,
-      selection ? `Re: "${selection.slice(0, 200)}"` : null,
-      ``,
       `Hello,`,
       ``,
-      `Based on the current page (${context.tab.url}) and focused field (${focusHint}), here is a prepared response.`,
+      `Regarding: ${instruction.slice(0, 240) || "(no instruction)"}`,
+      selection ? `Selection: "${selection.slice(0, 200)}"` : null,
       ``,
-      `Please review before sending.`,
+      `Based on ${context.tab.title || context.tab.url} (${focusHint}), here is a prepared reply.`,
       ``,
       `Best regards`,
     ]
@@ -44,7 +126,7 @@ export class StubDraftProvider implements DraftProvider {
 
     return {
       draft,
-      explanation: "StubDraftProvider generated a deterministic draft from page metadata.",
+      explanation: "StubDraftProvider generated a reply from the browser prompt/context.",
       target: {
         type: focus?.tagName ?? "unknown",
         purpose: "reply",

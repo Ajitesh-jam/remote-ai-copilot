@@ -19,7 +19,7 @@ import {
 } from "./draft/provider.js";
 import { ExecutionController } from "./execution/halt.js";
 import { runPrepare } from "./execution/prepare.js";
-import { runGo } from "./execution/type-text.js";
+import { runTyping } from "./execution/type-text.js";
 
 export class AgentSession {
   readonly sessionId: string;
@@ -32,12 +32,15 @@ export class AgentSession {
   draftProvider: DraftProvider;
 
   private draft: DraftResult | null = null;
+  private remainingText: string | null = null;
+  private typedOffset = 0;
   private snapshot: PrepareSnapshot | null = null;
   private lastContext: PageContext | null = null;
   private lastError: string | null = null;
   private lastSuccessfulAction: string | null = null;
   private taskId: string | null = null;
   private locked = false;
+  private lastResolvedInstruction: string | null = null;
 
   constructor(private readonly config: CopilotConfig) {
     this.sessionId = randomUUID();
@@ -78,9 +81,12 @@ export class AgentSession {
       activeTab: null,
       draftPreview: this.draft?.draft ?? null,
       draftExplanation: this.draft?.explanation ?? null,
+      remainingPreview: this.remainingText,
+      canResume: this.state.getState() === "HALTED" && !!this.remainingText?.length,
       lastError: this.lastError,
       lastSuccessfulAction: this.lastSuccessfulAction,
       taskId: this.taskId,
+      shortcuts: this.config.shortcuts,
     };
   }
 
@@ -111,12 +117,16 @@ export class AgentSession {
     draft: string;
     explanation?: string;
     context: PageContext;
+    resolvedInstruction: string;
   }> {
     if (this.locked) {
       throw new Error("Agent is locked");
     }
-    // Cancel any in-flight work and start fresh
+    // New PREPARE cancels previous work (including resume remainder)
     this.execution.halt();
+    this.remainingText = null;
+    this.typedOffset = 0;
+
     const result = await runPrepare({
       browser: this.browser,
       draftProvider: this.draftProvider,
@@ -126,23 +136,27 @@ export class AgentSession {
       instruction,
     });
     this.draft = result.draft;
+    this.remainingText = result.draft.draft;
+    this.typedOffset = 0;
     this.snapshot = result.snapshot;
     this.lastContext = result.context;
+    this.lastResolvedInstruction = result.resolvedInstruction;
     this.taskId = result.taskId;
     this.lastError = null;
     this.lastSuccessfulAction = new Date().toISOString();
     this.notify(
-      "Draft ready",
+      "Draft ready — press GO",
       result.draft.draft.slice(0, 180) + (result.draft.draft.length > 180 ? "…" : "")
     );
     return {
       draft: result.draft.draft,
       explanation: result.draft.explanation,
       context: result.context,
+      resolvedInstruction: result.resolvedInstruction,
     };
   }
 
-  async go(): Promise<{ typed: boolean; warning?: string }> {
+  async go(): Promise<{ typed: boolean; warning?: string; remaining?: string }> {
     if (this.locked) {
       throw new Error("Agent is locked");
     }
@@ -153,25 +167,98 @@ export class AgentSession {
       throw new Error("requireGo must remain true");
     }
 
-    const result = await runGo({
+    const text = this.remainingText ?? this.draft.draft;
+    const baseOffset = this.typedOffset;
+    const replace = this.config.agent.replaceFocusedOnGo && this.typedOffset === 0;
+
+    // Live progress so HALT status can report remaining immediately
+    const trackProgress = (n: number) => {
+      this.typedOffset = baseOffset + n;
+      this.remainingText = text.slice(n);
+    };
+
+    const result = await runTyping({
       browser: this.browser,
       state: this.state,
       execution: this.execution,
       logger: this.logger.child("execution"),
-      draft: this.draft.draft,
+      text,
       snapshot: this.snapshot,
+      replace,
       allowAutomaticSubmission: this.config.agent.allowAutomaticSubmission,
+      reason: "GO",
+      onProgress: trackProgress,
     });
+
+    this.typedOffset = baseOffset + result.typedChars;
+    this.remainingText = result.remaining || null;
 
     if (result.warning) {
       this.lastError = result.warning;
-      this.notify("Typing cancelled", result.warning.slice(0, 200));
+      this.notify("Typing paused / cancelled", result.warning.slice(0, 200));
     } else if (result.typed) {
       this.lastError = null;
+      this.remainingText = null;
       this.lastSuccessfulAction = new Date().toISOString();
-      this.notify("Typing complete", "Draft inserted into the focused field.");
+      this.notify("Typing complete", "Draft inserted.");
     }
-    return result;
+    return {
+      typed: result.typed,
+      warning: result.warning,
+      remaining: result.remaining,
+    };
+  }
+
+  async resume(): Promise<{ typed: boolean; warning?: string; remaining?: string }> {
+    if (this.locked) {
+      throw new Error("Agent is locked");
+    }
+    if (this.state.getState() !== "HALTED") {
+      throw new Error(`RESUME only when HALTED (current: ${this.state.getState()})`);
+    }
+    if (!this.remainingText?.length || !this.snapshot) {
+      throw new Error("Nothing to resume — press PREPARE then GO first");
+    }
+
+    this.logger.child("keyboard").event("HOTKEY_RESUME", "STARTED");
+
+    const text = this.remainingText;
+    const baseOffset = this.typedOffset;
+    const trackProgress = (n: number) => {
+      this.typedOffset = baseOffset + n;
+      this.remainingText = text.slice(n);
+    };
+
+    const result = await runTyping({
+      browser: this.browser,
+      state: this.state,
+      execution: this.execution,
+      logger: this.logger.child("execution"),
+      text,
+      snapshot: this.snapshot,
+      replace: false,
+      allowAutomaticSubmission: this.config.agent.allowAutomaticSubmission,
+      reason: "RESUME",
+      onProgress: trackProgress,
+    });
+
+    this.typedOffset = baseOffset + result.typedChars;
+    this.remainingText = result.remaining || null;
+
+    if (result.warning) {
+      this.lastError = result.warning;
+      this.notify("Resume paused", result.warning.slice(0, 200));
+    } else if (result.typed) {
+      this.lastError = null;
+      this.remainingText = null;
+      this.lastSuccessfulAction = new Date().toISOString();
+      this.notify("Resume complete", "Finished inserting the remaining draft.");
+    }
+    return {
+      typed: result.typed,
+      warning: result.warning,
+      remaining: result.remaining,
+    };
   }
 
   halt(): void {
@@ -180,8 +267,18 @@ export class AgentSession {
     this.execution.halt();
     void this.browser.stop();
     this.state.force("HALTED", "user HALT");
-    this.logger.child("agent").event("AGENT_HALTED", "SUCCESS");
-    this.notify("HALTED", "Execution stopped. Draft preserved.");
+    this.logger.child("agent").event("AGENT_HALTED", "SUCCESS", {
+      details: {
+        remainingLength: this.remainingText?.length ?? 0,
+        canResume: !!(this.remainingText && this.remainingText.length > 0),
+      },
+    });
+    this.notify(
+      "HALTED",
+      this.remainingText?.length
+        ? "Paused. Press RESUME to continue, or PREPARE to start over."
+        : "Stopped. Draft preserved if available."
+    );
   }
 
   lock(): void {
@@ -192,7 +289,7 @@ export class AgentSession {
   unlock(): void {
     this.locked = false;
     if (this.state.getState() === "HALTED" || this.state.getState() === "DISCONNECTED") {
-      if (this.browser.isConnected()) {
+      if (this.browser.isConnected() && !this.remainingText) {
         this.state.force("IDLE", "unlocked");
       }
     }
@@ -202,8 +299,16 @@ export class AgentSession {
     return this.draft;
   }
 
+  getRemaining(): string | null {
+    return this.remainingText;
+  }
+
   getLastContext(): PageContext | null {
     return this.lastContext;
+  }
+
+  getLastInstruction(): string | null {
+    return this.lastResolvedInstruction;
   }
 
   setLastError(message: string): void {

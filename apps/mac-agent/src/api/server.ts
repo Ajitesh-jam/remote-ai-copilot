@@ -38,9 +38,17 @@ export async function startAgentApi(session: AgentSession): Promise<{
 
   app.get("/api/status", async () => session.getStatusAsync());
 
-  app.post("/api/browser/connect", async () => {
+  app.post<{ Body: { mode?: "playwright" | "cdp" } }>("/api/browser/connect", async (req) => {
+    const mode = req.body?.mode;
+    if (mode === "playwright" || mode === "cdp") {
+      session.getConfig().browser.mode = mode;
+    }
     await session.connectBrowser();
-    return { ok: true };
+    return {
+      ok: true,
+      mode: session.getConfig().browser.mode,
+      cdpEndpoint: session.getConfig().browser.cdpEndpoint,
+    };
   });
 
   app.post("/api/browser/disconnect", async () => {
@@ -92,14 +100,29 @@ export async function startAgentApi(session: AgentSession): Promise<{
     return reply.type("image/png").send(buf);
   });
 
-  app.post<{ Body: { text: string } }>("/api/browser/type", async (req) => {
+  app.post<{ Body: { selector: string } }>("/api/browser/focus-selector", async (req) => {
+    const selector = req.body?.selector;
+    if (!selector) throw new Error("selector is required");
+    const browser = session.browser as {
+      focusSelector?: (s: string) => Promise<void>;
+    };
+    if (!browser.focusSelector) {
+      throw new Error("focusSelector not supported by current adapter");
+    }
+    await browser.focusSelector(selector);
+    return { ok: true, focused: await session.browser.getFocusedElement() };
+  });
+
+  app.post<{ Body: { text: string; replace?: boolean } }>("/api/browser/type", async (req) => {
     const text = req.body?.text;
     if (typeof text !== "string" || !text.length) {
       throw new Error("text is required");
     }
     const { signal } = session.execution.begin();
-    await session.browser.insertText(text, signal);
-    return { ok: true };
+    const result = await session.browser.insertText(text, signal, {
+      replace: !!req.body?.replace,
+    });
+    return { ok: true, typedChars: result.typedChars };
   });
 
   app.post<{ Body: { instruction?: string } }>("/api/prepare", async (req) => {
@@ -108,6 +131,7 @@ export async function startAgentApi(session: AgentSession): Promise<{
       ok: true,
       draft: result.draft,
       explanation: result.explanation,
+      resolvedInstruction: result.resolvedInstruction,
       tab: result.context.tab,
     };
   });
@@ -116,9 +140,18 @@ export async function startAgentApi(session: AgentSession): Promise<{
     return session.go();
   });
 
+  app.post("/api/resume", async () => {
+    return session.resume();
+  });
+
   app.post("/api/halt", async () => {
     session.halt();
-    return { ok: true, state: session.state.getState() };
+    return {
+      ok: true,
+      state: session.state.getState(),
+      canResume: !!session.getRemaining()?.length,
+      remainingLength: session.getRemaining()?.length ?? 0,
+    };
   });
 
   app.post("/api/lock", async () => {

@@ -12,7 +12,7 @@ Mac-local browser copilot with a strict **PREPARE → GO → HALT** control plan
 | Agent state machine | Implemented |
 | PREPARE / GO / HALT pipelines | Implemented |
 | Stub draft provider | Implemented |
-| Global shortcuts (⌘⌥P / ⌘⌥G / ⌘⌥H) | Implemented via optional `global-shortcuts` |
+| Global shortcuts (⌘⌥P / ⌘⌥G / ⌘⌥H) | Implemented (`global-shortcuts` or `node-global-key-listener`) |
 | DeepSeek / remote server | Phase 3 / 6 |
 | Chrome extension + CDP profile | Phase 4 |
 | Dashboard | Phase 7 |
@@ -23,7 +23,11 @@ Mac-local browser copilot with a strict **PREPARE → GO → HALT** control plan
 - Node.js 20+
 - Playwright Chromium (installed via `npx playwright install chromium`)
 
-Global hotkeys: if `global-shortcuts` installs cleanly, ⌘⌥P / ⌘⌥G / ⌘⌥H work system-wide. Otherwise use the CLI (`copilot prepare`, `copilot go`, `copilot halt`). Accessibility permissions may be required depending on the hotkey backend.
+Global hotkeys (⌘⌥P / ⌘⌥G / ⌘⌥H):
+
+1. Tries optional `global-shortcuts` first.
+2. Falls back to `node-global-key-listener` (grant **Accessibility** to Terminal/Node in System Settings → Privacy & Security).
+3. If neither works, use the CLI: `copilot prepare`, `copilot go`, `copilot halt`.
 
 ## Quick start
 

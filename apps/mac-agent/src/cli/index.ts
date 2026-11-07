@@ -62,22 +62,25 @@ program
     });
     child.unref();
 
-    // Wait briefly for pid file
-    for (let i = 0; i < 40; i++) {
+    // Wait for pid file + healthy HTTP
+    for (let i = 0; i < 50; i++) {
       await new Promise((r) => setTimeout(r, 100));
       const info = readPidInfo();
-      if (info) {
-        console.log(`Agent started (pid ${info.pid}) at http://${info.host}:${info.port}`);
-        return;
+      if (!info) continue;
+      try {
+        const health = await api<{ ok: boolean }>("GET", "/health");
+        if (health.ok) {
+          console.log(`Agent started (pid ${info.pid}) at http://${info.host}:${info.port}`);
+          return;
+        }
+      } catch {
+        // keep waiting
       }
     }
-    console.log(`Agent spawn requested (child pid ${child.pid}). Waiting for health…`);
-    try {
-      const health = await api<{ ok: boolean }>("GET", "/health");
-      console.log("Health:", health);
-    } catch (error) {
-      console.error("Agent may still be starting:", error instanceof Error ? error.message : error);
-    }
+    console.error(
+      "Agent process may have crashed while starting. Try:\n  npm run copilot -- start --foreground"
+    );
+    process.exitCode = 1;
   });
 
 program
@@ -166,9 +169,11 @@ const browser = program.command("browser").description("Browser tools");
 
 browser
   .command("connect")
-  .description("Connect / launch Playwright browser")
-  .action(async () => {
-    console.log(await api("POST", "/api/browser/connect"));
+  .description("Connect browser: Playwright launch (default) or CDP attach")
+  .option("--mode <mode>", "playwright | cdp", "playwright")
+  .action(async (opts: { mode: string }) => {
+    const mode = opts.mode === "cdp" ? "cdp" : "playwright";
+    console.log(await api("POST", "/api/browser/connect", { mode }));
   });
 
 browser
@@ -269,11 +274,28 @@ browser
   });
 
 browser
+  .command("focus-selector")
+  .argument("<selector>", "CSS selector")
+  .description("Focus an element by CSS selector (Playwright mode)")
+  .action(async (selector: string) => {
+    console.log(
+      JSON.stringify(
+        await api("POST", "/api/browser/focus-selector", { selector }),
+        null,
+        2
+      )
+    );
+  });
+
+browser
   .command("type")
   .argument("<text>", "Text to insert")
+  .option("--replace", "Replace field contents", false)
   .description("Manually type into focused element (explicit authorization)")
-  .action(async (text: string) => {
-    console.log(await api("POST", "/api/browser/type", { text }));
+  .action(async (text: string, opts: { replace?: boolean }) => {
+    console.log(
+      await api("POST", "/api/browser/type", { text, replace: !!opts.replace })
+    );
   });
 
 program
@@ -292,6 +314,13 @@ program
   .description("Type the prepared draft into the focused field")
   .action(async () => {
     console.log(JSON.stringify(await api("POST", "/api/go"), null, 2));
+  });
+
+program
+  .command("resume")
+  .description("Resume typing from where HALT paused")
+  .action(async () => {
+    console.log(JSON.stringify(await api("POST", "/api/resume"), null, 2));
   });
 
 program.parseAsync(process.argv).catch((error) => {
